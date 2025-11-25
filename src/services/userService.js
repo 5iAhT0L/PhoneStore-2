@@ -1,61 +1,11 @@
 import { pool } from "../config/db.js";
-import { createUserSchema } from "../Validation/userValidation.js";
-import { updateUserSchema } from "../Validation/userValidation.js";
-import validate from "../Validation/validation.js";
+import { ResponseError } from "../errors/responseError.js";
+import { loginSchema, registerSchema } from "../Validation/authValidation.js";
+import validate from "../Validation/validate.js";
+import bcrypt from "bcrypt";
 
-export const getAllUser = async () => {
-  const [users] = await pool.query(
-    `SELECT 
-            id, fullname, username, email, role,
-            address, phone_number, age
-           FROM users`
-  );
-
-  return users;
-};
-
-export const getUserById = async (id) => {
-  const [users] = await pool.query(
-    `SELECT id, fullname, username, email, role, address, phone_number, age FROM users WHERE id = ?`,
-    [id]
-  );
-
-  if (users.length === 0) {
-    throw new Error("User not found");
-  }
-
-  return users[0];
-};
-
-export const createUser = async (req) => {
-  const validated = validate(createUserSchema, req);
-
-  const { fullname, username, email, password, role } = validated;
-
-  const [result] = await pool.query(
-    "INSERT INTO users (fullname, username, email, password, role) VALUES (?, ?, ?, ?, ?)",
-    [
-      fullname,
-      username,
-      email,
-      password /* ganti hashedPassword kalau pakai bcrypt */,
-      role,
-    ]
-  );
-
-  const newUser = {
-    id: result.insertId,
-    fullname,
-    username,
-    email,
-    role,
-  };
-
-  return newUser;
-};
-
-export const updateUser = async (id, req) => {
-  const validated = validate(updateUserSchema, req);
+export const register = async (request) => {
+  const validated = validate(registerSchema, request);
 
   const {
     fullname,
@@ -68,33 +18,64 @@ export const updateUser = async (id, req) => {
     age,
   } = validated;
 
-  const [result] = await pool.query(
-    `UPDATE users 
-     SET fullname = ?, username = ?, email = ?, password = ?, role = ?, address = ?, phone_number = ?, age = ? 
-     WHERE id = ?`,
-    [fullname, username, email, password, role, address, phone_number, age, id]
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const [users] = await pool.query(
+    `SELECT INTO users fullname, username, email, password, role, address, phone_number, age
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      fullname,
+      username,
+      email,
+      hashedPassword,
+      role,
+      address,
+      phone_number,
+      age,
+    ]
   );
 
-  if (result.affectedRows === 0) {
-    throw new ResponseError(404, "User not found");
-  }
+  const newUser = {
+    id: users.insertId,
+    fullname,
+    username,
+    email,
+    role,
+    address,
+    phone_number,
+    age,
+  };
 
-  const [rows] = await pool.query(
-    `SELECT id, fullname, username, email, role, address, phone_number, age FROM users WHERE id = ?`,
-    [id]
-  );
-
-  return rows[0];
+  return newUser;
 };
 
-export const deleteUser = async (id) => {
-  await getUserById(id); // Cek apakah user ada
+export const login = async (request) => {
+  const { email, password } = validate(loginSchema, request);
 
-  const [result] = await pool.query(`DELETE FROM users WHERE id = ?`, [id]);
+  const [rows] = await pool.query("SELECT * FROM users WHERE email = ?", [
+    email,
+  ]);
 
-  if (result.affectedRows === 0) {
-    throw new ResponseError(404, "User not found");
+  if (rows.length === 0) {
+    throw new ResponseError("email atau password salah", 401);
   }
 
-  return { message: "User deleted successfully" };
+  const user = rows[0];
+
+  const isMatch = await bcrypt.compare(password, user.password);
+
+  if (!isMatch) {
+    throw new ResponseError(401, "email atau password salah");
+  }
+
+  return {
+    id: user.insertId,
+    fullname: user.fullname,
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    address: user.address,
+    phone_number: user.phone_number,
+    age: user.age,
+  };
 };
