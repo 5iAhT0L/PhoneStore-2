@@ -1,8 +1,15 @@
 import { pool } from "../config/db.js";
 import { ResponseError } from "../errors/responseError.js";
 import { loginSchema, registerSchema } from "../Validation/authValidation.js";
-import validate from "../Validation/validate.js";
+import { validate } from "../Validation/validate.js";
 import bcrypt from "bcrypt";
+
+export const getAllUsers = async () => {
+  const [users] = await pool.query(
+    `SELECT id, fullname, username, email, role, address, phone_number, age FROM users`
+  );
+  return users;
+};
 
 export const register = async (request) => {
   const validated = validate(registerSchema, request);

@@ -1,73 +1,88 @@
-import {
-  validateRegister,
-  validateLogin,
-} from "../Validation/validate.js";
+import bcrypt from "bcrypt";
+import { pool } from "../config/db.js";
+import { validateLogin, validateRegister } from "../Validation/validate.js";
+import { ResponseError } from "../errors/responseError.js";
+import { da } from "zod/v4/locales";
 
+// ==============================
+// REGISTER SERVICE
+// ==============================
 export const register = async (data) => {
   const result = validateRegister(data);
+  console.log(data);
 
   if (!result.success) {
     const errors = result.error.issues.map((i) => i.message);
-    const error = new Error(errors.join(", "));
-    error.status = 400;
-    throw error;
+    throw new ResponseError(errors.join(", "), 400);
   }
 
   const validData = result.data;
 
-  // SAFE fields only — DO NOT return password
-  const safeData = {
+  // Hash password
+  const hashedPassword = await bcrypt.hash(validData.password, 10);
+
+  // Insert user ke database
+  const [insert] = await pool.query(
+    `INSERT INTO users (fullname, username, email, password, role, address, phone_number, age)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      validData.fullname,
+      validData.username,
+      validData.email,
+      hashedPassword,
+      validData.role,
+      validData.address,
+      validData.phone_number,
+      validData.age,
+    ]
+  );
+
+  // Return SAFE DATA (tanpa password)
+  return {
+    id: insert.insertId,
+    fullname: validData.fullname,
     username: validData.username,
     email: validData.email,
-    fullname: validData.fullname,
     role: validData.role,
     address: validData.address,
     phone_number: validData.phone_number,
     age: validData.age,
   };
-
-  // TODO: database insert logic here
-
-  return safeData;
 };
 
+// ==============================
+// LOGIN SERVICE
+// ==============================
 export const login = async (data) => {
   const result = validateLogin(data);
 
   if (!result.success) {
     const errors = result.error.issues.map((i) => i.message);
-    const error = new Error(errors.join(", "));
-    error.status = 400;
-    throw error;
+    throw new ResponseError(errors.join(", "), 400);
   }
 
-  const validData = result.data;
+  const { email, password } = result.data;
 
-  // TODO: Fetch user from DB using validData.email
-  // Example dummy DB result:
-  const userFromDb = {
-    id: 7,
-    fullname: "Agung Santoso",
-    username: "agungsantoso",
-    email: "agung@example.com",
-    role: "user",
-    address: "Jl. Merdeka No.10",
-    phone_number: "081234567890",
-    age: 25,
-    // password: "xxxxx"   ← THIS SHOULD NEVER BE RETURNED
-  };
+  // Cek user dari database
+  const [rows] = await pool.query("SELECT * FROM users WHERE email = ?", [
+    email,
+  ]);
 
-  // Return exactly what you want (NO PASSWORD)
-  const safeLoginData = {
-    id: userFromDb.id,
-    fullname: userFromDb.fullname,
-    username: userFromDb.username,
-    email: userFromDb.email,
-    role: userFromDb.role,
-    address: userFromDb.address,
-    phone_number: userFromDb.phone_number,
-    age: userFromDb.age,
-  };
+  if (rows.length === 0) {
+    throw new ResponseError("email atau password salah", 401);
+  }
 
-  return safeLoginData;
+  const user = rows[0];
+
+  // Cek password
+  const isValid = await bcrypt.compare(password, user.password);
+
+  if (!isValid) {
+    throw new ResponseError("email atau password salah", 401);
+  }
+
+  // SAFE USER (tanpa password)
+  const { password: pw, ...safeUser } = user;
+
+  return safeUser;
 };
